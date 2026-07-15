@@ -1,5 +1,4 @@
 <h2>mostly-a-FLIPPER</h2>
-
 <br><b></b>Flipper Zero Firmware on Cardputer ADV</b> <br>
 Fully QFlipper and BLESP v3 compatible.
 
