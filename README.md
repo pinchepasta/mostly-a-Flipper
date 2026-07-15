@@ -3,9 +3,9 @@
 <br><b></b>Flipper Zero Firmware on Cardputer ADV</b>
 Fully QFlipper and BLESP v3 compatible.
 
-<img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/fl.png" alt="mostly-a-Flipper Screenshots" width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/br.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%">
+<img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/fl.png" alt="mostly-a-Flipper Screenshots" width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/br.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/m1.png" alt="mostly-a-Flipper Screenshots" width="25%" height="25%"> 
 
-<img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/m1.png" alt="mostly-a-Flipper Screenshots" width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/t1.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%">
+<img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/t1.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/s.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%">
 
 
 <img src="https://mostlyawesome.de/dev/p2.jpg" alt="Another one" width="40%" height="40%"> <img src="https://mostlyawesome.de/dev/p1.jpg" alt="Picture of mostly-A-FLIPPER" width="40%" height="40%"> 
