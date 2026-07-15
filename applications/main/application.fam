@@ -1,0 +1,30 @@
+App(
+    appid="main_apps",
+    name="Basic applications for main menu",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "gpio",
+        "ibutton",
+        "infrared",
+        "lfrfid",
+        "nfc",
+        "subghz",
+        "bad_usb",
+        "bad_keyboard",
+        "u2f",
+        "archive",
+        "clock",
+        "doom",
+        "subghz_remote",
+        "main_apps_on_start",
+    ],
+)
+
+App(
+    appid="main_apps_on_start",
+    name="On start hooks",
+    apptype=FlipperAppType.METAPACKAGE,
+    provides=[
+        "cli",
+    ],
+)

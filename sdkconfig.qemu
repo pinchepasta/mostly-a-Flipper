@@ -1,0 +1,18 @@
+# =============================================================================
+# QEMU overlay — apply ON TOP of a board's defaults when running under QEMU.
+#
+# The Cardputer's normal console is USB-Serial-JTAG (and currently resolves to
+# NONE). QEMU's `idf.py qemu` captures UART0 via `-serial mon:stdio`, so route
+# the console to UART0 here to make the bootloader + app logs visible in the
+# emulator. This file is NOT used for real-hardware builds.
+#
+# NOTE: QEMU (Espressif fork) emulates the CPU, RAM, flash and UART — but NOT
+# the ST7789 LCD, keyboard, SD, WiFi or BLE. The firmware will boot and start
+# initializing Furi services, then likely stall at the first access to an
+# unmodeled peripheral (SPI display DMA or the BLE controller). The log shows
+# how far it gets; it cannot render the GUI.
+# =============================================================================
+CONFIG_ESP_CONSOLE_UART_NONE=n
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200

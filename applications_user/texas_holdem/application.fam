@@ -1,0 +1,10 @@
+App(
+    appid="texas_holdem",
+    name="Texas Holdem",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="texas_holdem_app",
+    requires=["gui"],
+    stack_size=4 * 1024,
+    order=31,
+    fap_category="Games",
+)

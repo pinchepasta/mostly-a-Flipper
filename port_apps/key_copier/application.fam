@@ -1,0 +1,21 @@
+App(
+    appid="key_copier",
+    name="Key Copier",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="main_key_copier_app",
+    icon="I_icon",
+    stack_size=4 * 1024,
+    requires=[
+        "gui",
+        "dialogs",
+        "storage",
+        "notification",
+    ],
+    order=10,
+    fap_icon="icon.png",
+    fap_category="Tools",
+    fap_icon_assets="assets",
+    fap_description="Physical key bitting measurer and designer (Cardputer port)",
+    fap_version="1.5",
+    fap_author="Torron"
+)

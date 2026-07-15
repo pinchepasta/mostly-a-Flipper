@@ -1,0 +1,53 @@
+# =============================================================================
+# M5Stack Cardputer (Standard) Optimized Configuration
+# =============================================================================
+
+# Flash Configuration
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# Partition table: the auto-applied sdkconfig.defaults.esp32s3 selects the 16 MB
+# multiboot layout (T-Embed + Bruce dual-boot). The Cardputer has only 8 MB and
+# no dual-boot, so force the single-app (6 MB factory) table that fits 8 MB.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_singleapp_large.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_singleapp_large.csv"
+
+# PSRAM is not present on standard Cardputer
+CONFIG_SPIRAM=n
+
+# =============================================================================
+# CPU Configuration
+# =============================================================================
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+
+# =============================================================================
+# Logging & Console Configuration (FREE GPIO 43/44)
+# =============================================================================
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_UART_CUSTOM=n
+CONFIG_ESP_CONSOLE_UART_NONE=y
+
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# Specific component log levels
+CONFIG_LOG_WIFI_LEVEL_WARNING=y
+CONFIG_LOG_BT_LEVEL_WARNING=y
+
+# =============================================================================
+# TinyUSB Configuration
+# The console uses USB-Serial-JTAG (configured above). TinyUSB CDC must stay
+# ENABLED regardless: the base firmware (furi_hal_usb_cdc.c and the composite
+# device) #errors at compile time without CONFIG_TINYUSB_CDC_ENABLED. The
+# composite USB-OTG device is only installed lazily (qFlipper / USB-Storage),
+# so this does not disturb the Serial-JTAG console or esptool flashing.
+# =============================================================================
+CONFIG_TINYUSB_HID_COUNT=1
+CONFIG_TINYUSB_DESC_BOS_ENABLED=y
+CONFIG_TINYUSB_HID_BUFSIZE=16
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1

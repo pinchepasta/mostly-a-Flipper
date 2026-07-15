@@ -1,0 +1,14 @@
+App(
+    appid="mostlygotchi",
+    name="mostlyGotchi",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="mostlygotchi_app",
+    cdefines=["APP_MOSTLYGOTCHI"],
+    requires=["gui"],
+    stack_size=1 * 1024,
+    icon="A_Plugins_14",
+    fap_category="Games",
+    fap_description="A playful mostlyGotchi companion for the Cardputer",
+    fap_author="OpenAI",
+    fap_version=(0, 1),
+)

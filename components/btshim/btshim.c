@@ -1,0 +1,1021 @@
+/**
+ * @file btshim.c
+ * BT service — ESP32 implementation
+ *
+ * Based on STM32 bt.c + bt_api.c. Uses the same message-queue architecture
+ * and GapEvent callback system. RPC and Power integration are excluded
+ * until those services are ported.
+ */
+
+#include "bt_i.h"
+
+#include <furi_hal_bt.h>
+#include <furi_hal_big_fap.h>
+#include <gui/elements.h>
+#include <assets_icons.h>
+#include <notification/notification_messages.h>
+#include <ble_profile/extra_profiles/hid_profile.h>
+#include <ble_profile/extra_profiles/serial_profile.h>
+#include <rpc/rpc.h>
+#include <esp_log.h>
+#include <esp_bt.h>
+#include <esp_heap_caps.h>
+#include <esp_bt_main.h>
+#include <esp_gap_ble_api.h>
+#include <ble_serial.h>
+
+#define BT_RPC_EVENT_BUFF_SENT    (1UL << 0)
+#define BT_RPC_EVENT_DISCONNECTED (1UL << 1)
+#define BT_RPC_EVENT_ALL          (BT_RPC_EVENT_BUFF_SENT | BT_RPC_EVENT_DISCONNECTED)
+
+/* RX feeder thread event flags */
+#define BT_RX_EVENT_DATA      (1UL << 0)
+#define BT_RX_EVENT_STOP      (1UL << 1)
+#define BT_RX_EVENT_ALL       (BT_RX_EVENT_DATA | BT_RX_EVENT_STOP)
+
+/* Intermediate RX buffer between the BLE GATTS callback and the RPC feeder
+ * thread. BLE serial delivers ~155-byte packets and the feeder drains fast, so
+ * 8 KB was hugely oversized for a no-PSRAM board where every KB counts at the
+ * moment the phone connects (BT stack + connection leave only a few KB free,
+ * and rpc_session_open then needs its own ~6 KB). 1 KB (~6 packets) is enough. */
+#define BT_RX_STREAM_SIZE     (1024)
+
+#define BT_RPC_MIN_FREE_INTERNAL    (24 * 1024)
+#define BT_RPC_MIN_LARGEST_INTERNAL (8 * 1024)
+#define BT_RX_THREAD_MIN_FREE_INTERNAL    (10 * 1024)
+#define BT_RX_THREAD_MIN_LARGEST_INTERNAL (6 * 1024)
+
+/* Use ESP_LOG for BLE/RPC debug since FURI_LOG may not work in BTC task context */
+#define BT_LOG_I(fmt, ...) ESP_LOGI("BtSrv", fmt, ##__VA_ARGS__)
+#define BT_LOG_E(fmt, ...) ESP_LOGE("BtSrv", fmt, ##__VA_ARGS__)
+#define BT_LOG_W(fmt, ...) ESP_LOGW("BtSrv", fmt, ##__VA_ARGS__)
+#define BT_LOG_D(fmt, ...) ESP_LOGD("BtSrv", fmt, ##__VA_ARGS__)
+
+#define TAG "BtSrv"
+
+/* WiFi mem-release latch (see btshim.h). Plain global: set from the WiFi app
+ * thread after esp_bt_controller_mem_release(), read from BLE app start paths. */
+static volatile bool s_bt_mem_released = false;
+void bt_mark_mem_released(void) {
+    s_bt_mem_released = true;
+}
+bool bt_is_mem_released(void) {
+    return s_bt_mem_released;
+}
+
+BtStatus bt_get_status(Bt* bt) {
+    return bt ? bt->status : BtStatusUnavailable;
+}
+
+#define ICON_SPACER          2
+#define BT_DEFAULT_MTU       BLE_PROFILE_SERIAL_PACKET_SIZE_MAX
+
+/* ---- Statusbar ---- */
+
+static void bt_draw_statusbar_callback(Canvas* canvas, void* context) {
+    furi_assert(context);
+
+    Bt* bt = context;
+    uint8_t draw_offset = 0;
+    if(bt->beacon_active) {
+        canvas_draw_icon(canvas, 0, 0, &I_BLE_beacon_7x8);
+        draw_offset += icon_get_width(&I_BLE_beacon_7x8) + ICON_SPACER;
+    }
+    if(bt->status == BtStatusAdvertising) {
+        canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Idle_5x8);
+    } else if(bt->status == BtStatusConnected) {
+        canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Connected_16x8);
+    }
+}
+
+static ViewPort* bt_statusbar_view_port_alloc(Bt* bt) {
+    ViewPort* statusbar_view_port = view_port_alloc();
+    view_port_set_width(statusbar_view_port, 5);
+    view_port_draw_callback_set(statusbar_view_port, bt_draw_statusbar_callback, bt);
+    view_port_enabled_set(statusbar_view_port, false);
+    return statusbar_view_port;
+}
+
+/* ---- PIN code display ---- */
+
+static void bt_pin_code_view_port_draw_callback(Canvas* canvas, void* context) {
+    furi_assert(context);
+    Bt* bt = context;
+    char pin_code_info[24];
+    canvas_draw_icon(canvas, 0, 0, &I_BLE_Pairing_128x64);
+    snprintf(pin_code_info, sizeof(pin_code_info), "Pairing code\n%06lu", bt->pin_code);
+    elements_multiline_text_aligned(canvas, 64, 4, AlignCenter, AlignTop, pin_code_info);
+    elements_button_left(canvas, "Quit");
+}
+
+static void bt_pin_code_view_port_input_callback(InputEvent* event, void* context) {
+    furi_assert(context);
+    Bt* bt = context;
+    if(event->type == InputTypeShort) {
+        if(event->key == InputKeyLeft || event->key == InputKeyBack) {
+            view_port_enabled_set(bt->pin_code_view_port, false);
+        }
+    }
+}
+
+static ViewPort* bt_pin_code_view_port_alloc(Bt* bt) {
+    ViewPort* view_port = view_port_alloc();
+    view_port_draw_callback_set(view_port, bt_pin_code_view_port_draw_callback, bt);
+    view_port_input_callback_set(view_port, bt_pin_code_view_port_input_callback, bt);
+    view_port_enabled_set(view_port, false);
+    return view_port;
+}
+
+static void bt_pin_code_show(Bt* bt, uint32_t pin_code) {
+    bt->pin_code = pin_code;
+    if(!bt->pin_code_view_port) {
+        bt->pin_code_view_port = bt_pin_code_view_port_alloc(bt);
+        gui_add_view_port(bt->gui, bt->pin_code_view_port, GuiLayerFullscreen);
+    }
+    notification_message(bt->notification, &sequence_display_backlight_on);
+    if(bt->suppress_pin_screen) return;
+
+    gui_view_port_send_to_front(bt->gui, bt->pin_code_view_port);
+    view_port_enabled_set(bt->pin_code_view_port, true);
+}
+
+static void bt_pin_code_hide(Bt* bt) {
+    bt->pin_code = 0;
+    if(bt->pin_code_view_port && view_port_is_enabled(bt->pin_code_view_port)) {
+        view_port_enabled_set(bt->pin_code_view_port, false);
+    }
+}
+
+/* ---- Storage callback for key reload ---- */
+
+static void bt_storage_callback(const void* message, void* context) {
+    furi_assert(context);
+    Bt* bt = context;
+    const StorageEvent* event = message;
+
+    if(event->type == StorageEventTypeCardMount) {
+        const BtMessage msg = {
+            .type = BtMessageTypeReloadKeysSettings,
+        };
+
+        furi_check(
+            furi_message_queue_put(bt->message_queue, &msg, FuriWaitForever) == FuriStatusOk);
+    }
+}
+
+/* ---- Allocation ---- */
+
+static Bt* bt_alloc(void) {
+    /* calloc, not malloc: several fields (beacon_active, rpc_session, status_cb,
+     * suppress_pin_screen, ...) are otherwise read before being written. */
+    Bt* bt = calloc(1, sizeof(Bt));
+
+    bt->max_packet_size = BT_DEFAULT_MTU;
+    bt->current_profile = NULL;
+
+    /* Must be explicit: BtStatusOff is 1, not 0, so a zeroed struct still reads
+     * as BtStatusUnavailable. Without this the "already off" guard in
+     * bt_handle_stop_stack never trips, and launching an app that calls
+     * bt_stop_stack (e.g. BLE Spam) tears down a stack that was never started —
+     * ble_serial_reset_initialized() then locks a NULL global mutex and aborts. */
+    bt->status = BtStatusOff;
+
+    /* Keys storage (stub on ESP32) */
+    bt->keys_storage = bt_keys_storage_alloc(BT_KEYS_STORAGE_PATH);
+
+    /* Message queue */
+    bt->message_queue = furi_message_queue_alloc(8, sizeof(BtMessage));
+
+    /* Statusbar view port */
+    bt->statusbar_view_port = bt_statusbar_view_port_alloc(bt);
+
+    /* Notification */
+    bt->notification = furi_record_open(RECORD_NOTIFICATION);
+
+    /* GUI */
+    bt->gui = furi_record_open(RECORD_GUI);
+    gui_add_view_port(bt->gui, bt->statusbar_view_port, GuiLayerStatusBarLeft);
+
+    /* RPC — initialize here (STM32 does this in a separate rpc_srv thread) */
+    rpc_init();
+    bt->rpc = furi_record_open(RECORD_RPC);
+    bt->rpc_event = furi_event_flag_alloc();
+
+    /* Intermediate RX buffer between GATTS callback and RPC */
+    bt->rx_stream = furi_stream_buffer_alloc(BT_RX_STREAM_SIZE, 1);
+
+    bt->pin = 0;
+
+    return bt;
+}
+
+/* ---- RX feeder thread: drains intermediate buffer into RPC ---- */
+
+static int32_t bt_rx_feeder_thread(void* context) {
+    Bt* bt = context;
+    uint8_t buf[512];
+
+    BT_LOG_I("RX feeder thread started");
+
+    while(true) {
+        uint32_t flags = furi_thread_flags_wait(BT_RX_EVENT_ALL, FuriFlagWaitAny, FuriWaitForever);
+
+        if(flags & BT_RX_EVENT_STOP) {
+            break;
+        }
+
+        if(flags & BT_RX_EVENT_DATA) {
+            /* Drain all available data from intermediate buffer into RPC */
+            while(!furi_stream_buffer_is_empty(bt->rx_stream)) {
+                size_t available = furi_stream_buffer_bytes_available(bt->rx_stream);
+                size_t to_read = (available > sizeof(buf)) ? sizeof(buf) : available;
+                size_t got = furi_stream_buffer_receive(bt->rx_stream, buf, to_read, 0);
+                if(got == 0) break;
+
+                /* Feed to RPC — this CAN block, which is fine on this thread */
+                size_t fed = 0;
+                while(fed < got) {
+                    size_t n = rpc_session_feed(
+                        bt->rpc_session, buf + fed, got - fed, 5000);
+                    if(n == 0) {
+                        BT_LOG_E("RPC feed stalled, dropping %zu bytes", got - fed);
+                        break;
+                    }
+                    fed += n;
+                }
+            }
+        }
+    }
+
+    BT_LOG_I("RX feeder thread stopped");
+    return 0;
+}
+
+/* ---- Serial service event callback (called from BLE GATTS task) ---- */
+
+static uint16_t bt_serial_event_callback(SerialServiceEvent event, void* context) {
+    furi_assert(context);
+    Bt* bt = context;
+    uint16_t ret = 0;
+
+    if(event.event == SerialServiceEventTypeDataReceived) {
+        /* Non-blocking write to intermediate buffer — MUST NOT block GATTS task */
+        size_t sent = furi_stream_buffer_send(
+            bt->rx_stream, event.data.buffer, event.data.size, 0);
+        if(sent != event.data.size) {
+            BT_LOG_E("RX overflow: %zu/%u bytes buffered", sent, event.data.size);
+        }
+        /* Wake the feeder thread. Snapshot the pointer: this callback runs on
+         * the GATTS task while bt_close_rpc_connection (BtSrv thread) frees
+         * rx_thread, so a packet landing mid-disconnect would deref NULL. */
+        FuriThread* rx_thread = bt->rx_thread;
+        if(rx_thread) {
+            furi_thread_flags_set(furi_thread_get_id(rx_thread), BT_RX_EVENT_DATA);
+        }
+        ret = furi_stream_buffer_spaces_available(bt->rx_stream);
+    } else if(event.event == SerialServiceEventTypeDataSent) {
+        /* Per-chunk on the Bluedroid task — keep off the console at INFO */
+        BT_LOG_D("TX confirmed");
+        furi_event_flag_set(bt->rpc_event, BT_RPC_EVENT_BUFF_SENT);
+    } else if(event.event == SerialServiceEventTypesBleResetRequest) {
+        FURI_LOG_I(TAG, "BLE restart request received");
+    }
+    return ret;
+}
+
+static void bt_rpc_send_bytes_callback(void* context, uint8_t* bytes, size_t bytes_len) {
+    furi_assert(context);
+    Bt* bt = context;
+
+    BT_LOG_I("TX send %zu bytes, max_pkt=%u", bytes_len, bt->max_packet_size);
+
+    if(furi_event_flag_get(bt->rpc_event) & BT_RPC_EVENT_DISCONNECTED) {
+        BT_LOG_W("TX aborted: disconnected");
+        return;
+    }
+    furi_event_flag_clear(bt->rpc_event, BT_RPC_EVENT_ALL & (~BT_RPC_EVENT_DISCONNECTED));
+    size_t bytes_sent = 0;
+    while(bytes_sent < bytes_len) {
+        size_t bytes_remain = bytes_len - bytes_sent;
+        size_t chunk = (bytes_remain > bt->max_packet_size) ? bt->max_packet_size : bytes_remain;
+        bool ok = ble_profile_serial_tx(bt->current_profile, &bytes[bytes_sent], chunk);
+        if(!ok) {
+            /* Indication couldn't be queued — usually the controller is out of
+             * internal RAM (BLE_INIT: Malloc failed). Drop the frame instead of
+             * wedging the session; the next frame is a fresh attempt. */
+            BT_LOG_E(
+                "TX chunk failed at offset %zu/%zu (free internal=%zu)",
+                bytes_sent,
+                bytes_len,
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+            break;
+        }
+        bytes_sent += chunk;
+
+        /* Wait for the client's indication-confirm (flow control). Capped at 1s:
+         * a stalled confirm means the controller never sent the packet, so block
+         * briefly and drop the frame — blocking the full 3s only backs up the GUI
+         * worker and gives the GATT indication-confirm watchdog time to kill the
+         * whole connection. */
+        uint32_t event_flag = furi_event_flag_wait(
+            bt->rpc_event, BT_RPC_EVENT_ALL, FuriFlagWaitAny | FuriFlagNoClear, 1000);
+        if(event_flag & BT_RPC_EVENT_DISCONNECTED) {
+            BT_LOG_W("TX aborted: disconnected during send");
+            break;
+        } else if(event_flag == (uint32_t)FuriStatusErrorTimeout) {
+            BT_LOG_E(
+                "TX confirm timeout, dropping frame (free internal=%zu)",
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+            break;
+        } else {
+            furi_event_flag_clear(bt->rpc_event, BT_RPC_EVENT_ALL & (~BT_RPC_EVENT_DISCONNECTED));
+        }
+    }
+    BT_LOG_I("TX done, sent %zu/%zu", bytes_sent, bytes_len);
+}
+
+static void bt_serial_buffer_is_empty_callback(void* context) {
+    furi_assert(context);
+    Bt* bt = context;
+    if(furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial)) {
+        ble_profile_serial_notify_buffer_is_empty(bt->current_profile);
+    }
+}
+
+static void bt_open_rpc_connection(Bt* bt) {
+    BT_LOG_I("bt_open_rpc_connection: session=%p status=%d profile=%p",
+        (void*)bt->rpc_session, bt->status, (void*)bt->current_profile);
+    if(!bt->rpc_session && bt->status == BtStatusConnected) {
+        /* Open RPC record lazily on first connection */
+        if(!bt->rpc) {
+            BT_LOG_I("Opening RECORD_RPC...");
+            bt->rpc = furi_record_open(RECORD_RPC);
+            BT_LOG_I("RECORD_RPC opened: %p", (void*)bt->rpc);
+        }
+        furi_event_flag_clear(bt->rpc_event, BT_RPC_EVENT_DISCONNECTED);
+        bool is_serial = furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial);
+        BT_LOG_I("Profile is_serial=%d", is_serial);
+        if(is_serial) {
+            /* Opening the RPC session allocates ~6 KB (stream buffer + PB_Main)
+             * and the RX feeder thread another stack allocation. On this no-PSRAM board the
+             * BLE stack + an active connection can leave less than that free, in
+             * which case those allocations abort (furi_check / xTaskCreate) and
+             * reboot the device. Guard: if the heap is too low, leave the link
+             * connected but skip RPC setup instead of crashing. The phone shows
+             * connected-but-idle rather than taking the whole device down. */
+            size_t freeh = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+            size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+            if(freeh < BT_RPC_MIN_FREE_INTERNAL || largest < BT_RPC_MIN_LARGEST_INTERNAL) {
+                BT_LOG_E(
+                    "Low RAM (%u free, %u largest): skipping RPC-over-BLE",
+                    (unsigned)freeh,
+                    (unsigned)largest);
+                return;
+            }
+            bt->rpc_session = rpc_session_open(bt->rpc, RpcOwnerBle);
+            if(bt->rpc_session) {
+                BT_LOG_I("RPC session opened OK");
+                /* Start RX feeder thread. It only waits on
+                 * a flag, drains the RX stream buffer, and calls rpc_session_feed
+                 * (a shallow stream_buffer_send -- protobuf decode runs on the
+                 * separate RPC thread). Allocated here at connect time when the
+                 * heap is tightest, so keep it small. */
+                furi_stream_buffer_reset(bt->rx_stream);
+                freeh = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+                if(freeh < BT_RX_THREAD_MIN_FREE_INTERNAL ||
+                   largest < BT_RX_THREAD_MIN_LARGEST_INTERNAL) {
+                    BT_LOG_E(
+                        "Low RAM after RPC open (%u free, %u largest): closing RPC",
+                        (unsigned)freeh,
+                        (unsigned)largest);
+                    rpc_session_close(bt->rpc_session);
+                    bt->rpc_session = NULL;
+                    return;
+                }
+                rpc_session_set_send_bytes_callback(bt->rpc_session, bt_rpc_send_bytes_callback);
+                rpc_session_set_buffer_is_empty_callback(
+                    bt->rpc_session, bt_serial_buffer_is_empty_callback);
+                rpc_session_set_context(bt->rpc_session, bt);
+                bt->rx_thread = furi_thread_alloc_ex(
+                    "BtRxFeeder", 2048, bt_rx_feeder_thread, bt);
+                furi_thread_start(bt->rx_thread);
+                ble_profile_serial_set_event_callback(
+                    bt->current_profile, BT_RX_STREAM_SIZE, bt_serial_event_callback, bt);
+                ble_profile_serial_set_rpc_active(
+                    bt->current_profile, FuriHalBtSerialRpcStatusActive);
+                BT_LOG_I("RPC over BLE fully initialized");
+            } else {
+                BT_LOG_W("RPC is busy, failed to open new session");
+            }
+        }
+    }
+}
+
+static void bt_close_rpc_connection(Bt* bt) {
+    if(furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial) &&
+       bt->rpc_session) {
+        FURI_LOG_I(TAG, "Close RPC connection");
+        ble_profile_serial_set_rpc_active(
+            bt->current_profile, FuriHalBtSerialRpcStatusNotActive);
+        furi_event_flag_set(bt->rpc_event, BT_RPC_EVENT_DISCONNECTED);
+        /* Deregister the GATTS event callback BEFORE freeing the RX thread:
+         * a packet arriving in between would wake a thread that no longer
+         * exists (bt_serial_event_callback reads bt->rx_thread). */
+        ble_profile_serial_set_event_callback(bt->current_profile, 0, NULL, NULL);
+        /* Stop RX feeder thread */
+        if(bt->rx_thread) {
+            furi_thread_flags_set(furi_thread_get_id(bt->rx_thread), BT_RX_EVENT_STOP);
+            furi_thread_join(bt->rx_thread);
+            furi_thread_free(bt->rx_thread);
+            bt->rx_thread = NULL;
+        }
+        rpc_session_close(bt->rpc_session);
+        bt->rpc_session = NULL;
+    }
+}
+
+/* ---- GAP event callback (called from furi_hal_bt bridge) ---- */
+
+static bool bt_on_gap_event_callback(GapEvent event, void* context) {
+    furi_assert(context);
+    Bt* bt = context;
+    bool ret = false;
+    bt->pin = 0;
+    bool do_update_status = false;
+
+    if(event.type == GapEventTypeConnected) {
+        bt->status = BtStatusConnected;
+        do_update_status = true;
+        bt_open_rpc_connection(bt);
+        ret = true;
+    } else if(event.type == GapEventTypeDisconnected) {
+        bt_close_rpc_connection(bt);
+        bt->status = BtStatusOff;
+        do_update_status = true;
+        ret = true;
+    } else if(event.type == GapEventTypeStartAdvertising) {
+        bt->status = BtStatusAdvertising;
+        do_update_status = true;
+        ret = true;
+    } else if(event.type == GapEventTypeStopAdvertising) {
+        bt->status = BtStatusOff;
+        do_update_status = true;
+        ret = true;
+    } else if(event.type == GapEventTypePinCodeShow) {
+        bt->pin = event.data.pin_code;
+        BtMessage message = {
+            .type = BtMessageTypePinCodeShow, .data.pin_code = event.data.pin_code};
+        if(furi_message_queue_put(bt->message_queue, &message, 100) != FuriStatusOk) {
+            BT_LOG_E("BtSrv queue full, pin code popup dropped");
+        }
+        ret = true;
+    } else if(event.type == GapEventTypeUpdateMTU) {
+        bt->max_packet_size = event.data.max_packet_size;
+        ret = true;
+    } else if(event.type == GapEventTypeBeaconStart) {
+        bt->beacon_active = true;
+        do_update_status = true;
+        ret = true;
+    } else if(event.type == GapEventTypeBeaconStop) {
+        bt->beacon_active = false;
+        do_update_status = true;
+        ret = true;
+    }
+
+    if(do_update_status) {
+        /* This callback runs on the Bluedroid BTC task. BtSrv's stop-stack path
+         * blocks inside esp_bluedroid_disable() waiting for that same task, so a
+         * blocking put here (queue full while BtSrv is tearing down) deadlocks
+         * both threads until the task watchdog reboots the device. Drop the
+         * status refresh instead — the next event posts a fresh one. */
+        BtMessage message = {.type = BtMessageTypeUpdateStatus};
+        if(furi_message_queue_put(bt->message_queue, &message, 0) != FuriStatusOk) {
+            BT_LOG_W("BtSrv queue full, status update dropped");
+        }
+    }
+    return ret;
+}
+
+static void bt_on_key_storage_change_callback(uint8_t* addr, uint16_t size, void* context) {
+    furi_assert(context);
+    Bt* bt = context;
+    BtMessage message = {
+        .type = BtMessageTypeKeysStorageUpdated,
+        .data.key_storage_data.start_address = addr,
+        .data.key_storage_data.size = size};
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+}
+
+/* ---- Statusbar update ---- */
+
+static void bt_statusbar_update(Bt* bt) {
+    uint8_t active_icon_width = 0;
+    if(bt->beacon_active) {
+        active_icon_width = icon_get_width(&I_BLE_beacon_7x8) + ICON_SPACER;
+    }
+    if(bt->status == BtStatusAdvertising) {
+        active_icon_width += icon_get_width(&I_Bluetooth_Idle_5x8);
+    } else if(bt->status == BtStatusConnected) {
+        active_icon_width += icon_get_width(&I_Bluetooth_Connected_16x8);
+    }
+
+    if(active_icon_width > 0) {
+        view_port_set_width(bt->statusbar_view_port, active_icon_width);
+        view_port_enabled_set(bt->statusbar_view_port, true);
+    } else {
+        view_port_enabled_set(bt->statusbar_view_port, false);
+    }
+}
+
+/* ---- Profile management ---- */
+
+static void bt_change_profile(Bt* bt, BtMessage* message) {
+    if(furi_hal_bt_is_gatt_gap_supported()) {
+        bt_settings_load(&bt->bt_settings);
+
+        bt_keys_storage_load(bt->keys_storage);
+
+        bt->current_profile = furi_hal_bt_change_app(
+            message->data.profile.template,
+            message->data.profile.params,
+            bt_keys_storage_get_root_keys(bt->keys_storage),
+            bt_on_gap_event_callback,
+            bt);
+        if(bt->current_profile) {
+            FURI_LOG_I(TAG, "Bt App started");
+            if(bt->bt_settings.enabled) {
+                furi_hal_bt_start_advertising();
+            }
+            furi_hal_bt_set_key_storage_change_callback(bt_on_key_storage_change_callback, bt);
+        } else {
+            FURI_LOG_E(TAG, "Failed to start Bt App");
+        }
+        if(message->profile_instance) {
+            *message->profile_instance = bt->current_profile;
+        }
+        if(message->result) {
+            *message->result = bt->current_profile != NULL;
+        }
+
+    } else {
+        FURI_LOG_E(TAG, "Radio stack doesn't support this app");
+        if(message->result) {
+            *message->result = false;
+        }
+        if(message->profile_instance) {
+            *message->profile_instance = NULL;
+        }
+    }
+}
+
+static void bt_close_connection(Bt* bt) {
+    bt_close_rpc_connection(bt);
+    furi_hal_bt_stop_advertising();
+}
+
+static void bt_apply_settings(Bt* bt) {
+    FURI_LOG_I(TAG, "bt_apply_settings: enabled=%d", bt->bt_settings.enabled);
+    if(bt->bt_settings.enabled) {
+        furi_hal_bt_start_advertising();
+    } else {
+        furi_hal_bt_stop_advertising();
+    }
+}
+
+static void bt_load_keys(Bt* bt) {
+    if(!furi_hal_bt_is_gatt_gap_supported()) {
+        FURI_LOG_W(TAG, "Unsupported radio stack");
+        bt->status = BtStatusUnavailable;
+        return;
+
+    } else if(bt_keys_storage_is_changed(bt->keys_storage)) {
+        FURI_LOG_I(TAG, "Loading new keys");
+        bt_keys_storage_load(bt->keys_storage);
+        bt->current_profile = NULL;
+    } else {
+        FURI_LOG_I(TAG, "Keys unchanged");
+    }
+}
+
+static void bt_start_application(Bt* bt) {
+    FURI_LOG_I(TAG, "bt_start_application: current_profile=%p", (void*)bt->current_profile);
+    if(!bt->current_profile) {
+        FURI_LOG_I(TAG, "Starting ble_profile_serial...");
+        /* Use serial profile as default (same as STM32) */
+        bt->current_profile = furi_hal_bt_change_app(
+            ble_profile_serial,
+            NULL,
+            bt_keys_storage_get_root_keys(bt->keys_storage),
+            bt_on_gap_event_callback,
+            bt);
+
+        if(!bt->current_profile) {
+            FURI_LOG_E(TAG, "BLE App start failed");
+            bt->status = BtStatusUnavailable;
+        } else {
+            FURI_LOG_I(TAG, "BLE App started OK, profile=%p", (void*)bt->current_profile);
+        }
+    }
+}
+
+static void bt_load_settings(Bt* bt) {
+    bt_settings_load(&bt->bt_settings);
+    bt_apply_settings(bt);
+}
+
+static void bt_handle_get_settings(Bt* bt, BtMessage* message) {
+    *message->data.settings = bt->bt_settings;
+}
+
+/* Defined below; declared here so the settings toggle can bring the radio stack
+ * up/down on the enabled transition (see bt_handle_set_settings). */
+static void bt_handle_stop_stack(Bt* bt);
+static void bt_handle_start_stack(Bt* bt);
+
+static void bt_handle_set_settings(Bt* bt, BtMessage* message) {
+    const bool was_enabled = bt->bt_settings.enabled;
+    bt->bt_settings = *message->data.csettings;
+    const bool now_enabled = bt->bt_settings.enabled;
+
+    if(now_enabled && !was_enabled) {
+        /* Off -> On: on no-PSRAM boards the BLE controller + Bluedroid host and
+         * the serial GATT profile are deferred at boot, so this toggle is where
+         * they actually start. Just calling start_advertising is not enough --
+         * there is no profile registered yet. bt_handle_start_stack brings up
+         * the radio stack, registers the serial profile, then advertises. */
+        bt_handle_start_stack(bt);
+    } else if(!now_enabled && was_enabled) {
+        /* On -> Off: tear the stack down to reclaim the ~64 KB it holds. */
+        bt_handle_stop_stack(bt);
+    } else {
+        /* No enabled-state change: just (re)apply advertising state. */
+        bt_apply_settings(bt);
+    }
+    bt_settings_save(&bt->bt_settings);
+}
+
+static void bt_handle_reload_keys_settings(Bt* bt) {
+    bt_load_keys(bt);
+    bt_start_application(bt);
+    bt_load_settings(bt);
+}
+
+static void bt_handle_stop_stack(Bt* bt) {
+    FURI_LOG_I(TAG, "Stopping BLE stack...");
+
+    if(bt->status == BtStatusOff) {
+        FURI_LOG_I(TAG, "BLE stack already off");
+        return;
+    }
+
+    bt_close_rpc_connection(bt);
+    furi_hal_bt_stop_advertising();
+
+    if(bt->current_profile) {
+        bt->current_profile->config->stop(bt->current_profile);
+        bt->current_profile = NULL;
+    }
+
+    // Only deinit if stack was actually initialized
+    if(esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_UNINITIALIZED) {
+        esp_bluedroid_disable();
+        furi_delay_ms(50);
+        esp_bluedroid_deinit();
+        furi_delay_ms(50);
+    }
+
+    if(esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_IDLE) {
+        esp_bt_controller_disable();
+        furi_delay_ms(50);
+    }
+    if(esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
+        esp_bt_controller_deinit();
+        furi_delay_ms(50);
+    }
+
+    ble_serial_reset_initialized();
+    furi_hal_bt_reinit(); // clear stale profile pointer in HAL
+
+    bt->status = BtStatusOff;
+    FURI_LOG_I(TAG, "BLE stack stopped");
+}
+
+static void bt_handle_start_stack(Bt* bt) {
+    FURI_LOG_I(TAG, "Starting BLE stack...");
+
+    /* Big FAP Mode blocks the radios so heavy apps keep the heap. Covers every
+     * enable path (lock menu, Settings→Bluetooth, RPC) at the single choke. */
+    if(furi_hal_big_fap_is_active()) {
+        FURI_LOG_W(TAG, "Big FAP Mode active; BLE stack stays down");
+        bt->status = BtStatusOff;
+        return;
+    }
+
+    /* WiFi released the BLE controller's RAM this boot — esp_bt_controller_init()
+     * would fault. Stay down until reboot. */
+    if(s_bt_mem_released) {
+        FURI_LOG_W(TAG, "BLE controller RAM released for WiFi; reboot to use BLE");
+        bt->status = BtStatusUnavailable;
+        return;
+    }
+
+    /* Only bring the stack up if Bluetooth is actually enabled. On this no-PSRAM
+     * board BT is off by default and the serial stack is not running at the
+     * desktop. Apps that borrow the radio (BLE Spam/Walk) call bt_stop_stack on
+     * entry and bt_start_stack on exit -- if BT was off, "restoring" it here
+     * would start a stack that was never up AND fail: bringing up the controller
+     * + Bluedroid needs ~64 KB, but the app + its BLE UUID DB leave only ~45 KB,
+     * so the init OOMs and aborts inside ESP-IDF (BTU_StartUp / controller reset).
+     * Skip it -- bt_set_settings starts the stack when the user enables BT. */
+    if(!bt->bt_settings.enabled) {
+        FURI_LOG_I(TAG, "BT disabled, leaving stack down");
+        bt->status = BtStatusOff;
+        return;
+    }
+
+    /* Crash guard: bringing up the controller + Bluedroid reserves ~64 KB. If the
+     * heap is already too low the alloc OOM-aborts *inside* ESP-IDF (before
+     * furi_hal_bt_start_radio_stack() can return false), taking the firmware down.
+     * Check first and refuse gracefully — this is the fix for "BT reboots when
+     * turned on" on this no-PSRAM board. */
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    if(free_internal < BT_MIN_FREE_INTERNAL || largest_internal < BT_MIN_LARGEST_INTERNAL) {
+        FURI_LOG_W(
+            TAG,
+            "Only %u B free / %u B largest (need %u / %u); refusing BLE start",
+            (unsigned)free_internal,
+            (unsigned)largest_internal,
+            (unsigned)BT_MIN_FREE_INTERNAL,
+            (unsigned)BT_MIN_LARGEST_INTERNAL);
+        bt->status = BtStatusUnavailable;
+        return;
+    }
+
+    if(furi_hal_bt_start_radio_stack()) {
+        bt_start_application(bt);
+        if(bt->bt_settings.enabled) {
+            furi_hal_bt_start_advertising();
+        }
+    } else {
+        FURI_LOG_E(TAG, "Radio stack start failed");
+        bt->status = BtStatusUnavailable;
+    }
+
+    FURI_LOG_I(TAG, "BLE stack started");
+}
+
+static void bt_init_keys_settings(Bt* bt) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    furi_pubsub_subscribe(storage_get_pubsub(storage), bt_storage_callback, bt);
+
+    if(storage_sd_status(storage) != FSE_OK) {
+        FURI_LOG_D(TAG, "SD Card not ready, skipping settings");
+        /* Start the BLE application without loading keys or settings */
+        bt_start_application(bt);
+        /* Still load settings (from internal storage) */
+        bt_load_settings(bt);
+        return;
+    }
+
+    bt_handle_reload_keys_settings(bt);
+}
+
+/* ---- Public API (bt_api.c equivalent) ---- */
+
+FuriHalBleProfileBase* bt_profile_start(
+    Bt* bt,
+    const FuriHalBleProfileTemplate* profile_template,
+    FuriHalBleProfileParams params) {
+    furi_check(bt);
+
+    FuriHalBleProfileBase* profile_instance = NULL;
+
+    BtMessage message = {
+        .lock = api_lock_alloc_locked(),
+        .type = BtMessageTypeSetProfile,
+        .profile_instance = &profile_instance,
+        .data.profile.params = params,
+        .data.profile.template = profile_template,
+    };
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+    api_lock_wait_unlock_and_free(message.lock);
+
+    bt->current_profile = profile_instance;
+    return profile_instance;
+}
+
+bool bt_profile_restore_default(Bt* bt) {
+    /* Restore the serial profile (same as STM32) */
+    bt->current_profile = bt_profile_start(bt, ble_profile_serial, NULL);
+    return bt->current_profile != NULL;
+}
+
+void bt_disconnect(Bt* bt) {
+    furi_check(bt);
+
+    BtMessage message = {.lock = api_lock_alloc_locked(), .type = BtMessageTypeDisconnect};
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+    api_lock_wait_unlock_and_free(message.lock);
+}
+
+void bt_set_status_changed_callback(Bt* bt, BtStatusChangedCallback callback, void* context) {
+    furi_check(bt);
+
+    bt->status_changed_cb = callback;
+    bt->status_changed_ctx = context;
+}
+
+void bt_forget_bonded_devices(Bt* bt) {
+    furi_check(bt);
+    BtMessage message = {.type = BtMessageTypeForgetBondedDevices};
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+}
+
+void bt_keys_storage_set_storage_path(Bt* bt, const char* keys_storage_path) {
+    furi_check(bt);
+    furi_check(bt->keys_storage);
+    furi_check(keys_storage_path);
+
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    FuriString* path = furi_string_alloc_set(keys_storage_path);
+    storage_common_resolve_path_and_ensure_app_directory(storage, path);
+
+    bt_keys_storage_set_file_path(bt->keys_storage, furi_string_get_cstr(path));
+
+    furi_string_free(path);
+    furi_record_close(RECORD_STORAGE);
+}
+
+void bt_keys_storage_set_default_path(Bt* bt) {
+    furi_check(bt);
+    furi_check(bt->keys_storage);
+
+    bt_keys_storage_set_file_path(bt->keys_storage, BT_KEYS_STORAGE_PATH);
+}
+
+void bt_get_settings(Bt* bt, BtSettings* settings) {
+    furi_assert(bt);
+    furi_assert(settings);
+
+    BtMessage message = {
+        .lock = api_lock_alloc_locked(),
+        .type = BtMessageTypeGetSettings,
+        .data.settings = settings,
+    };
+
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+
+    api_lock_wait_unlock_and_free(message.lock);
+}
+
+bool bt_is_enabled(Bt* bt) {
+    furi_assert(bt);
+    BtSettings settings;
+    bt_get_settings(bt, &settings);
+    return settings.enabled;
+}
+
+void bt_set_settings(Bt* bt, const BtSettings* settings) {
+    furi_assert(bt);
+    furi_assert(settings);
+
+    BtMessage message = {
+        .lock = api_lock_alloc_locked(),
+        .type = BtMessageTypeSetSettings,
+        .data.csettings = settings,
+    };
+
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+
+    api_lock_wait_unlock_and_free(message.lock);
+}
+
+void bt_stop_stack(Bt* bt) {
+    furi_assert(bt);
+    BtMessage message = {
+        .lock = api_lock_alloc_locked(),
+        .type = BtMessageTypeStopStack,
+    };
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+    api_lock_wait_unlock_and_free(message.lock);
+}
+
+void bt_start_stack(Bt* bt) {
+    furi_assert(bt);
+    BtMessage message = {
+        .lock = api_lock_alloc_locked(),
+        .type = BtMessageTypeStartStack,
+    };
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+    api_lock_wait_unlock_and_free(message.lock);
+}
+
+/* ---- Service main loop ---- */
+
+int32_t bt_srv(void* p) {
+    UNUSED(p);
+    Bt* bt = bt_alloc();
+
+    /* Load settings FIRST to know if BLE should be started */
+    bt_settings_load(&bt->bt_settings);
+
+    if(!furi_hal_bt_is_available()) {
+        /* Board without BLE radio (e.g. Waveshare C6-1.47): force-disable so the
+         * radio stack (BT controller + Bluedroid, ~100KB heap) is never started,
+         * leaving that RAM for WiFi. The service still runs so RECORD_BT exists
+         * and BLE-dependent code degrades gracefully instead of crashing. */
+        bt->bt_settings.enabled = false;
+    }
+
+#if !defined(CONFIG_SPIRAM)
+    /* No-PSRAM boards (M5Stack Cardputer / Cardputer-ADV): the BLE controller +
+     * Bluedroid host reserve ~64 KB of internal RAM the moment the radio stack
+     * starts. With only ~200 KB total that leaves ~36 KB free at the desktop —
+     * not enough to launch ANY app (the first stream-buffer alloc fails and the
+     * firmware asserts/reboots). So default BLE OFF here: the device boots with
+     * ~100 KB free and apps launch. BT can still be enabled on demand in
+     * Settings (it brings the stack up then). */
+    if(bt->bt_settings.enabled) {
+        FURI_LOG_W(TAG, "No PSRAM: deferring BLE stack (~64 KB) so apps can launch");
+        bt->bt_settings.enabled = false;
+    }
+#endif
+
+    if(bt->bt_settings.enabled) {
+        /* Start the BLE stack and default profile */
+        if(furi_hal_bt_start_radio_stack()) {
+            bt_init_keys_settings(bt);
+            furi_hal_bt_set_key_storage_change_callback(bt_on_key_storage_change_callback, bt);
+        } else {
+            FURI_LOG_E(TAG, "Radio stack start failed");
+        }
+    } else {
+        FURI_LOG_I(TAG, "BT disabled in settings, skipping BLE stack init");
+    }
+
+    furi_record_create(RECORD_BT, bt);
+
+    FURI_LOG_I(TAG, "BtSrv ready (enabled=%d)", bt->bt_settings.enabled);
+
+    BtMessage message;
+
+    while(1) {
+        furi_check(
+            furi_message_queue_get(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+        FURI_LOG_D(
+            TAG,
+            "msg %d, lock 0x%p, result 0x%p",
+            message.type,
+            (void*)message.lock,
+            (void*)message.result);
+
+        if(message.type == BtMessageTypeUpdateStatus) {
+            bt_statusbar_update(bt);
+            bt_pin_code_hide(bt);
+            if(bt->status_changed_cb) {
+                bt->status_changed_cb(bt->status, bt->status_changed_ctx);
+            }
+        } else if(message.type == BtMessageTypeUpdateBatteryLevel) {
+            furi_hal_bt_update_battery_level(message.data.battery_level);
+        } else if(message.type == BtMessageTypeUpdatePowerState) {
+            furi_hal_bt_update_power_state(message.data.power_state_charging);
+        } else if(message.type == BtMessageTypePinCodeShow) {
+            bt_pin_code_show(bt, message.data.pin_code);
+        } else if(message.type == BtMessageTypeKeysStorageUpdated) {
+            bt_keys_storage_update(
+                bt->keys_storage,
+                message.data.key_storage_data.start_address,
+                message.data.key_storage_data.size);
+        } else if(message.type == BtMessageTypeSetProfile) {
+            bt_change_profile(bt, &message);
+        } else if(message.type == BtMessageTypeDisconnect) {
+            bt_close_connection(bt);
+        } else if(message.type == BtMessageTypeForgetBondedDevices) {
+            bt_keys_storage_delete(bt->keys_storage);
+        } else if(message.type == BtMessageTypeGetSettings) {
+            bt_handle_get_settings(bt, &message);
+        } else if(message.type == BtMessageTypeSetSettings) {
+            bt_handle_set_settings(bt, &message);
+        } else if(message.type == BtMessageTypeReloadKeysSettings) {
+            bt_handle_reload_keys_settings(bt);
+        } else if(message.type == BtMessageTypeStopStack) {
+            bt_handle_stop_stack(bt);
+        } else if(message.type == BtMessageTypeStartStack) {
+            bt_handle_start_stack(bt);
+        }
+
+        if(message.lock) api_lock_unlock(message.lock);
+    }
+
+    return 0;
+}

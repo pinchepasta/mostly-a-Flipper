@@ -1,0 +1,7 @@
+# Currently no LD fragment mappings required.
+#
+# Doom war früher hier: alle .bss-Sektionen seiner Sources wurden nach
+# extram_bss (PSRAM) geforced, weil sonst ~31 KB internes BSS die
+# WiFi/BLE-Stacks beim Boot ESP_ERR_NO_MEM auslösen ließen.
+# Jetzt wird Doom als externer FAP geladen — der ELF-Loader allokiert
+# .bss/.data zur Laufzeit aus dem PSRAM-Heap, daher kein Mapping nötig.
