@@ -18,6 +18,14 @@ You can install the firmware with launcher, or you can install it with the web f
 The firmware is <i>only fully functional with this sd files</i>.
 
 
+
+
+<h2>Change username:</h2> Got to Settings -> Passport -> now press left arrow key -> type in new username -> move to "save", and you're good to go!
+
+
+
+
+
 <h2>IR-Payload-Collection.zip:</h2> Download the zip file and use it in your sd root, to have a solid starting point for ir pentesting.
 Download it <a href="https://github.com/pinchepasta/Flipper-Zero-Firmware-on-Cardputer-ADV/blob/main/IR-Payload-Collection.zip">right here</a>
 
