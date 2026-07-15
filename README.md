@@ -19,7 +19,7 @@ And the best part is, it runs on Cardputer ADV, and all of it's external modules
 
 
 
-The firmware for the Cardputer &amp; Cardputer ADV. It's a fork of Sor3nt's Flipper-Zero-ESP32-Port.
+This is a fork of Sor3nt's Flipper-Zero-ESP32-Port btw.
 
 I put my focus on rf emission and rf signal intelligence in general, and thus I'm going to update and enhance the firmware's functionality in future updates.
 
