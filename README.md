@@ -1,6 +1,6 @@
 <h2>mostly-a-FLIPPER</h2>
 
-<br><b></b>Flipper Zero Firmware on Cardputer ADV</b>
+<br><b></b>Flipper Zero Firmware on Cardputer ADV</b> <br>
 Fully QFlipper and BLESP v3 compatible.
 
 <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/fl.png" alt="mostly-a-Flipper Screenshots" width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/br.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/m1.png" alt="mostly-a-Flipper Screenshots" width="25%" height="25%"> 
