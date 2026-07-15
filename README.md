@@ -1,4 +1,7 @@
-<h2>mostly-a-FLIPPER</h2> Flipper Zero Firmware on Cardputer ADV
+<h2>mostly-a-FLIPPER</h2> <b></b>Flipper Zero Firmware on Cardputer ADV</b>
+
+
+
 
 <img src="https://mostlyawesome.de/dev/p2.jpg" alt="Another one" width="40%" height="40%"> <img src="https://mostlyawesome.de/dev/p1.jpg" alt="Picture of mostly-A-FLIPPER" width="40%" height="40%"> 
 
