@@ -8,7 +8,9 @@
 <img src="https://mostlyawesome.de/dev/p2.jpg" alt="Another one" width="40%" height="40%"> <img src="https://mostlyawesome.de/dev/p1.jpg" alt="Picture of mostly-A-FLIPPER" width="40%" height="40%"> 
 
 <br>
+This is a highly customized version of the Flipper Zero firmware, but it's much more capable than the basic version, and I'm working on improving it constantly.
 
+<br><br>
 <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/t1.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/s.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%">
 
 
