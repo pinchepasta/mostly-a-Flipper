@@ -28,7 +28,7 @@ I put my focus on rf emission and rf signal intelligence in general, and thus I'
 I made the firmware compatible with  <a href="https://github.com/bmorcelli/Launcher">bmorcelli's launcher</a>. 
 You can install the firmware with launcher, or you can install it with the web flasher.
 
-<h2>SD.zip - download and path:</h2> You need to download this file <a href="https://github.com/pinchepasta/Flipper-Zero-Firmware-on-Cardputer-ADV/blob/main/sdcard.zip">sd.zip</a> and unzip it to the root of your sd card.
+<h2>SD.zip - download and path:</h2> You need to download this file <a href="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/sdcard.zip">sd.zip</a> and unzip it to the root of your sd card.
 
 The firmware is <i>only fully functional with this sd files</i>.
 
