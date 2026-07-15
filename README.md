@@ -50,21 +50,13 @@ M5Stack Cardputer & Cardputer ADV
 
 <h2>Bugfixes</h2>
 
-<b>1.19 Fixes:</b> Passport let's you change your username now. Waterfall in sub-ghz section now works well enough. 
+Passport let's you change your username now. Waterfall in sub-ghz section now works well enough. 
 
+RF-Shortcuts got a uniform remote ui and bugs fixed that made the app crash. Now I'm working to fix the BadBLE feature
 
--
+I fixed the "out of PSRAM" bug, and the soft reset after leaving wifi section is also fixed, the device now doesn't need to reboot at any point.
 
-
-<b>1.18 Fixes:</b> RF-Shortcuts got a uniform remote ui and bugs fixed that made the app crash. Now I'm working to fix the BadBLE feature
-
--
-
-<b>1.17 Fixes:</b> I fixed the "out of PSRAM" bug, and the soft reset after leaving wifi section is also fixed, the device now doesn't need to reboot at any point.
-
--
-
-<b>1.16 Fixes:</b>  RF related issues with the Cardputer ADV and the Pingequa NRF24/CC1101 module, like not being able to transmit .sub files are fixed, also now the rf jammer, and all bruteforce modes are fully functional.
+RF related issues with the Cardputer ADV and the Pingequa NRF24/CC1101 module, like not being able to transmit .sub files are fixed, also now the rf jammer, and all bruteforce modes are fully functional.
 
 
 <h2>What I'm working on:</h2>
