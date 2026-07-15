@@ -9,6 +9,8 @@
 
 <br>
 This is a highly customized version of the Flipper Zero firmware, but it's much more capable than the basic version, and I'm working on improving it constantly.
+And the best part is, it runs on Cardputer ADV, and all of it's external modules are being made compatible, like the Pingequa CC1101 / NRF24 Hydra combo module on my dev unit.
+
 
 <br><br>
 <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/t1.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%"> <img src="https://github.com/pinchepasta/mostly-a-Flipper/blob/main/s.png" alt="mostly-a-Flipper Screenshots"  width="25%" height="25%">
@@ -17,7 +19,7 @@ This is a highly customized version of the Flipper Zero firmware, but it's much 
 
 
 
-This is a port of the Flipper Zero firmware for the Cardputer &amp; Cardputer ADV. It's a fork of Sor3nt's Flipper-Zero-ESP32-Port.
+The firmware for the Cardputer &amp; Cardputer ADV. It's a fork of Sor3nt's Flipper-Zero-ESP32-Port.
 
 I put my focus on rf emission and rf signal intelligence in general, and thus I'm going to update and enhance the firmware's functionality in future updates.
 
