@@ -71,14 +71,50 @@ RF related issues with the Cardputer ADV and the Pingequa NRF24/CC1101 module, l
 
 <h2>What I'm working on:</h2>
 
-- espConnect integration to make file sharing with bruce devices possible (95% done)
-- Improved rolling code handling, more protocols. (90% done)
-- Pwnagotchi integration of some kind. (50% done)
-- IR-Shortcuts & system wide shortcuts with a push of a button. (100%)
-- BLESP v3 integration and remote control of the flipper. (100)
-- IMSI Catcher detector (50% done)
-Stay tuned!
 
+---
+
+
+<h2>What I'm working on:</h2>
+
+<b>mostly-a-Flipper Appstore</b>: I'm working on an appstore with esp32 compiled apps, that makes it easier for the user to install and delete new applications.
+
+-
+
+<b>Custom QFlipper Android/iOS:</b> I'm building a custom QFlipper app for both android and iOS devices, to make installing apps via appstore and a few other things much easier on the user side of things, some might call it convenient.
+
+-
+
+<b>nrf24 Jammer:</b> It emmits data but it doesn't seem to disrupt any real connection like 2.4GHz wifi or BLE adv for example, and I'm about to fix that.
+
+-
+
+<b>espConnect integration:</b> to make file sharing with bruce devices possible (95% done)
+
+-
+
+<b>Rolling code:</b> mproved rolling code handling, more protocols. (90% done)
+
+-
+
+<b>Pwnagotchi:</b> mproved rolling code handling, more protocols. (90% done)
+
+-
+
+<b>IR-Shortcuts:</b> system wide shortcuts with a push of a button. (100%)
+
+-
+
+<b>BLESP v3:</b> integration and remote control of the flipper. (100)
+
+-
+
+<b>IMSI Catcher detector</b> almost done, like (75% done)
+<br>
+
+---   
+
+Stay tuned!
 
 
 
