@@ -3,12 +3,19 @@ file(GLOB_RECURSE SUBGHZ_SOURCES
     "../../lib/drivers/cc1101.c"
     "../../applications/drivers/subghz/cc1101_ext/cc1101_ext.c"
     "../../applications/drivers/subghz/cc1101_ext/cc1101_ext_interconnect.c"
+    # Include application helper sources that implement public subghz
+    # TX/RX helpers so they are linked into the subghz component and
+    # available to other applications.
+    "../../applications/main/subghz/helpers/*.c"
+    "../../applications/main/subghz_remote/helpers/txrx/*.c"
 )
 
 idf_component_register(
     SRCS ${SUBGHZ_SOURCES}
     INCLUDE_DIRS
         ".."
+        "../../applications/main/subghz"
+        "../../applications/main"
         "../../lib/drivers"
         "../../lib/subghz"
         # NICHT "../../lib/subghz/blocks": dessen math.h enthaelt nur subghz-CRC-Helfer

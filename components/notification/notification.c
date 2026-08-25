@@ -959,3 +959,13 @@ void notification_message_save_settings(NotificationApp* app) {
     furi_assert(app);
     notification_message_send(app, SaveSettingsMessage, &sequence_empty, NULL);
 }
+
+void notification_message_save_settings_blocking(NotificationApp* app) {
+    furi_assert(app);
+
+    FuriEventFlag* back_event = furi_event_flag_alloc();
+    notification_message_send(app, SaveSettingsMessage, &sequence_empty, back_event);
+    furi_event_flag_wait(
+        back_event, NOTIFICATION_EVENT_COMPLETE, FuriFlagWaitAny, FuriWaitForever);
+    furi_event_flag_free(back_event);
+}

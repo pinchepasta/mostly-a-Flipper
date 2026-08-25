@@ -121,6 +121,7 @@ static void backlight_changed(VariableItem* item) {
     app->notification->settings.display_brightness = backlight_value[index];
 
     notification_message(app->notification, &sequence_display_backlight_force_on);
+    notification_message_save_settings(app->notification); /* persist */
 }
 
 static void screen_changed(VariableItem* item) {
@@ -134,6 +135,7 @@ static void screen_changed(VariableItem* item) {
         furi_timer_stop(app->notification->display_timer);
     }
     notification_message(app->notification, &sequence_display_backlight_on);
+    notification_message_save_settings(app->notification); /* persist */
 }
 
 static void volume_changed(VariableItem* item) {
@@ -628,7 +630,11 @@ int32_t notification_settings_app(void* p) {
     UNUSED(p);
     NotificationAppSettings* app = alloc_settings();
     view_dispatcher_run(app->view_dispatcher);
-    notification_message_save_settings(app->notification);
+    /* Blocking: guarantees every change made in this screen is actually on
+     * flash before the app (and this process) tears down, instead of racing
+     * whatever the user does next (e.g. immediately backing out to Power
+     * Settings and rebooting). */
+    notification_message_save_settings_blocking(app->notification);
     free_settings(app);
     return 0;
 }

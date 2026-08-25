@@ -6,6 +6,7 @@
 #include <storage/storage.h>
 #include <dialogs/dialogs.h>
 #include <bt/bt_service/bt.h>
+#include <notification/notification_messages.h>
 
 #include <esp_system.h>
 #include <esp_bt.h>
@@ -255,6 +256,14 @@ cleanup:
     gui_direct_draw_release(app.gui);
     furi_record_close(RECORD_INPUT_EVENTS);
     furi_record_close(RECORD_GUI);
+
+    /* This bypasses the normal power service reboot path, so flush any
+     * settings save that's still sitting in the notification service's
+     * queue ourselves — otherwise a display/backlight change made just
+     * before launching the game is silently lost on this reboot. */
+    NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
+    notification_message_save_settings_blocking(notification);
+    furi_record_close(RECORD_NOTIFICATION);
 
     FURI_LOG_I(TAG, "exit -> esp_restart()");
     esp_restart();

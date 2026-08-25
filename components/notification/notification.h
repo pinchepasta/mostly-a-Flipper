@@ -108,6 +108,19 @@ void notification_internal_message_block(
     NotificationApp* app,
     const NotificationSequence* sequence);
 
+/**
+ * @brief Flush any pending settings save (LCD backlight, UI colors, LED
+ * config, night shift, volume) to flash and block until it's durably
+ * written. The regular save path is a fire-and-forget queue message, which
+ * is fine during normal use but must not be raced against a reboot or
+ * power-off — call this first in that case, or a save queued moments
+ * earlier can be lost, which is what makes display settings appear to
+ * "reset" after a restart.
+ *
+ * @param app notification record content
+ */
+void notification_message_save_settings_blocking(NotificationApp* app);
+
 #ifdef __cplusplus
 }
 #endif

@@ -126,7 +126,12 @@ struct NotificationApp {
     float current_night_shift;
 };
 
-/** Save current settings (enqueues a save message to the notification thread). */
+/** Save current settings (enqueues a save message to the notification thread).
+ * Fire-and-forget: returns immediately, before the write to flash actually
+ * happens. Fine for "save as the user keeps tweaking a slider", but do NOT
+ * rely on it immediately before a reboot/power-off — use
+ * notification_message_save_settings_blocking() (declared in notification.h)
+ * there, or the settings can be lost. */
 void notification_message_save_settings(NotificationApp* app);
 
 /** Push settings.led_color to the WS2812 ring. Call after settings.led_color

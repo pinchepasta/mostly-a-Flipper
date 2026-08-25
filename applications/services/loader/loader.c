@@ -10,6 +10,7 @@
 #include <toolbox/path.h>
 #include <flipper_application/flipper_application.h>
 #include <loader/firmware_api/firmware_api.h>
+#include <notification/notification_messages.h>
 
 #define TAG "Loader"
 
@@ -153,6 +154,9 @@ static void loader_show_gui_error(
                 AlignTop);
             dialog_message_set_buttons(message, NULL, NULL, "Reboot");
             if(dialog_message_show(dialogs, message) == DialogMessageButtonRight) {
+                NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
+                notification_message_save_settings_blocking(notification);
+                furi_record_close(RECORD_NOTIFICATION);
                 furi_hal_power_reset();
             }
             break;
@@ -845,6 +849,13 @@ static void loader_do_app_closed(Loader* loader) {
      * it, reboot back to normal (restores BT/WiFi availability). Only external
      * FAPs trigger this — internal/settings apps have was_fap == false. */
     if(was_fap && furi_hal_big_fap_is_active()) {
+        /* Big FAP exit reboots directly via esp_restart(), bypassing the
+         * power service's flush — do it ourselves so a settings save
+         * queued moments earlier isn't lost. */
+        NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
+        notification_message_save_settings_blocking(notification);
+        furi_record_close(RECORD_NOTIFICATION);
+
         furi_hal_big_fap_exit(); /* reboots; does not return */
     }
 

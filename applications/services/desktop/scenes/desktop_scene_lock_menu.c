@@ -35,7 +35,7 @@ static bool desktop_lock_menu_bruce_available(void) {
 /* Point the OTA boot slot at the Bruce firmware (ota_1) and reboot into it.
  * Bruce has the mirror-image entry that points back at ota_0. See
  * 00_Skills/multi-boot.md. */
-static void desktop_lock_menu_switch_to_bruce(void) {
+static void desktop_lock_menu_switch_to_bruce(NotificationApp* notification) {
     const esp_partition_t* target =
         esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
     if(target == NULL) {
@@ -48,6 +48,10 @@ static void desktop_lock_menu_switch_to_bruce(void) {
         return;
     }
     FURI_LOG_I("DesktopBruce", "rebooting into Bruce");
+    /* This calls furi_hal_power_reset() directly rather than going through
+     * the power service, so flush any pending settings save ourselves first
+     * or it's lost on this reboot. */
+    notification_message_save_settings_blocking(notification);
     furi_delay_ms(100);
     furi_hal_power_reset();
 }
@@ -122,7 +126,7 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
             break;
 
         case DesktopLockMenuEventBruce:
-            desktop_lock_menu_switch_to_bruce(); /* reboots; returns only on error */
+            desktop_lock_menu_switch_to_bruce(desktop->notification); /* reboots; returns only on error */
             consumed = true;
             break;
 
@@ -135,7 +139,10 @@ bool desktop_scene_lock_menu_on_event(void* context, SceneManagerEvent event) {
 
         case DesktopLockMenuEventBigFapToggle:
             /* Both paths soft-reset and do NOT return: enter() reboots into the
-             * clean max-heap state, exit() reboots back to normal. */
+             * clean max-heap state, exit() reboots back to normal. Neither goes
+             * through the power service, so flush any pending settings save
+             * ourselves first or it's lost on this reboot. */
+            notification_message_save_settings_blocking(desktop->notification);
             if(furi_hal_big_fap_is_active()) {
                 furi_hal_big_fap_exit();
             } else {

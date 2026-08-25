@@ -359,8 +359,21 @@ void power_trigger_ui_update(Power* power) {
     view_port_update(power->battery_view_port);
 }
 
+/* Flush any settings save that's still sitting in the notification service's
+ * message queue (e.g. LCD Backlight / UI Color / LED settings changed a
+ * moment ago via the async notification_message_save_settings()) so it's
+ * durably on flash before we cut power. Without this, a save that was queued
+ * but not yet processed is simply lost on shutdown/reboot — the classic
+ * "my display settings didn't stick" bug. */
+static void power_flush_notification_settings(void) {
+    NotificationApp* notification = furi_record_open(RECORD_NOTIFICATION);
+    notification_message_save_settings_blocking(notification);
+    furi_record_close(RECORD_NOTIFICATION);
+}
+
 static void power_handle_shutdown(Power* power) {
     UNUSED(power);
+    power_flush_notification_settings();
     furi_hal_power_off();
     /* furi_hal_power_off() should not return (enters deep sleep).
      * If it does, halt as fallback. */
@@ -378,6 +391,7 @@ static void power_handle_reboot(PowerBootMode mode) {
         furi_crash();
     }
 
+    power_flush_notification_settings();
     furi_hal_power_reset();
 }
 // get settings from service to settings_app by send message to power queue
