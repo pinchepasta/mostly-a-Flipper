@@ -10,6 +10,16 @@ MANIFEST_ROOTS = [
 APP_SOURCE_OVERRIDES = {
     "desktop": "applications",
     "storage": "applications",
+    # components/desktop_settings is a leftover ESP stub ("not implemented
+    # on ESP yet") sharing the same appid as the real, fully-implemented
+    # settings app in applications/settings/desktop_settings. Without this
+    # override, the manifest loader keeps whichever manifest it discovers
+    # first (components/ is scanned before applications/), so the stub
+    # silently wins the appid and shadows the real app: opening "Desktop"
+    # settings runs the no-op stub, so any display option a user changes
+    # there (clock, battery %, favorite app, etc.) never reaches
+    # desktop_settings_save() and appears to reset on every reboot.
+    "desktop_settings": "applications",
 }
 
 APPS = [

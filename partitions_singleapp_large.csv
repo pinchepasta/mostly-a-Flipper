@@ -1,6 +1,15 @@
 # Name,   Type, SubType, Offset,  Size, Flags
 # Local override for the ESP32 port: the ported Flipper image is already
 # significantly larger than ESP-IDF's stock "singleapp_large" layout.
-nvs,      data, nvs,     ,        0x6000,
+#
+# NVS was previously 0x6000 (24KB), shared by every settings blob in the
+# firmware (BT pairing keys, Wi-Fi credentials, desktop/power/input/
+# notification/expansion settings, status LED, etc). As BT devices get
+# paired or Wi-Fi networks get saved, that namespace fills up, and writes
+# for larger blobs (like notification/display-color settings) can start
+# silently failing — the change still applies live in RAM, but never lands
+# in flash, so it reverts on reboot. 8MB flash total, only ~6MB used below,
+# so there's ample headroom to grow this; bumped to 0x20000 (128KB).
+nvs,      data, nvs,     ,        0x20000,
 phy_init, data, phy,     ,        0x1000,
 factory,  app,  factory, ,        0x600000,

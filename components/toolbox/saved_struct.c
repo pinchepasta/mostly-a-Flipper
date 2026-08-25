@@ -80,7 +80,19 @@ bool saved_struct_save(
     nvs_handle_t nvs;
     bool result = false;
     if(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        if(nvs_set_blob(nvs, key, blob, blob_size) == ESP_OK) {
+        esp_err_t err = nvs_set_blob(nvs, key, blob, blob_size);
+        if(err != ESP_OK) {
+            /* Overwriting an existing blob can fail under space pressure even
+             * though a fresh write to a freed key would succeed (NVS doesn't
+             * update blobs in place). Erase the stale entry and retry once
+             * before giving up, so a nearly-full namespace doesn't silently
+             * drop the write. */
+            FURI_LOG_W(
+                TAG, "NVS set_blob failed for \"%s\" (%d), retrying after erase", key, err);
+            nvs_erase_key(nvs, key);
+            err = nvs_set_blob(nvs, key, blob, blob_size);
+        }
+        if(err == ESP_OK) {
             if(nvs_commit(nvs) == ESP_OK) {
                 result = true;
             }
