@@ -15,6 +15,7 @@
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <stdint.h>
+#include <string.h>
 #include <freertos/task.h>
 #include <esp_rom_sys.h>
 
@@ -302,13 +303,46 @@ void furi_thread_set_stack_size(FuriThread* thread, size_t stack_size) {
     if(stack_size < 4096) stack_size = 4096;
 
     /* Prefer internal SRAM — flash/NVS writes disable the PSRAM cache and
-       cause a DoubleException on a PSRAM-resident stack. For apps that do
-       not write to flash/NVS (e.g. the Doom port, which only reads from
-       the SD card on a separate SPI bus) we fall back to PSRAM when the
-       internal heap cannot satisfy the request. */
+       cause a DoubleException on a PSRAM-resident stack. */
     thread->stack_buffer = heap_caps_malloc(stack_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if(!thread->stack_buffer) {
-        thread->stack_buffer = heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        /* Internal SRAM is fragmented or exhausted. PSRAM is only safe here
+         * for the handful of apps that never touch internal flash/NVS while
+         * running — they only read assets from the SD card, on a separate
+         * SPI bus (Doom, Wolf3D, MP3 Player; this is also why they're the
+         * only apps with stacks bigger than 8 KB).
+         *
+         * Falling back to PSRAM for *any* thread whose internal allocation
+         * happened to fail (the old behavior) is what caused the delayed
+         * reboots/crashes: running one of the big-stack apps above leaves
+         * internal SRAM fragmented, so a later, unrelated, small-stack app
+         * can also fail its internal allocation and silently get handed a
+         * PSRAM stack — then crash the moment it saves a setting to
+         * flash/NVS. That looked like "opening another app" was the cause,
+         * but the real damage happened earlier.
+         *
+         * So the PSRAM fallback is now opt-in by app name; everything else
+         * fails loudly and immediately below instead of drifting onto a
+         * stack that can fault unpredictably later. */
+        static const char* const psram_stack_safe_apps[] = {
+            "Doom",
+            "Wolf3D",
+            "MP3 Player",
+        };
+        bool psram_safe = false;
+        if(thread->name) {
+            for(size_t i = 0; i < COUNT_OF(psram_stack_safe_apps); i++) {
+                if(strcmp(thread->name, psram_stack_safe_apps[i]) == 0) {
+                    psram_safe = true;
+                    break;
+                }
+            }
+        }
+
+        if(psram_safe) {
+            thread->stack_buffer =
+                heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
     }
     /* Out of memory for the stack: fail with a clear, logged panic instead of
      * leaving stack_buffer NULL. furi_thread_start would otherwise hand
