@@ -1,10 +1,10 @@
 <h2>mostly-a-FLIPPER</h2>
-<br>
+<h3>NEWS:</h3>
+I'm about to implement an mpc server to give mostly-a-Flipper the option to be controlled by an ai for more complex tasks.
+<br><br>
+<h2>What is it?</h2>
 <b>Flipper Zero Firmware on Cardputer ADV</b> <br>
 (Fully QFlipper and BLESP v3 compatible)<br>
-<br>
-<br>
-
 <img src="https://mostlyawesome.de/dev/p2.jpg" alt="Another one" width="40%" height="40%"> <img src="https://mostlyawesome.de/dev/p1.jpg" alt="Picture of mostly-A-FLIPPER" width="40%" height="40%"> 
 
 <br>
@@ -69,9 +69,6 @@ I fixed the "out of PSRAM" bug, and the soft reset after leaving wifi section is
 RF related issues with the Cardputer ADV and the Pingequa NRF24/CC1101 module, like not being able to transmit .sub files are fixed, also now the rf jammer, and all bruteforce modes are fully functional.
 
 
-<h2>What I'm working on:</h2>
-
-
 ---
 
 
@@ -89,23 +86,12 @@ RF related issues with the Cardputer ADV and the Pingequa NRF24/CC1101 module, l
 
 -
 
-<b>espConnect integration:</b> to make file sharing with bruce devices possible (95% done)
-
--
-
 <b>Rolling code:</b> mproved rolling code handling, more protocols. (90% done)
 
 -
 
-<b>Pwnagotchi:</b> mproved rolling code handling, more protocols. (90% done)
+<b>Pwnagotchi:</b> improved rolling code handling, more protocols. (90% done)
 
--
-
-<b>IR-Shortcuts:</b> system wide shortcuts with a push of a button. (100%)
-
--
-
-<b>BLESP v3:</b> integration and remote control of the flipper. (100)
 
 -
 
