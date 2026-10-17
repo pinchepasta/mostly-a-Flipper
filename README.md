@@ -1,7 +1,7 @@
 <h2>mostly-a-FLIPPER</h2>
 <h3>NEWS:</h3>
 I added a <b>Rolljam</b> feature which uses two Cardputer ADV via espnow, to distribute a super well working Rolljam attack. You need two devices though.
-The feature is tested right now and about to be added in a couple of days!
+The feature is tested right now and about to be live in a couple of days!
 
 <br><br>
 <h2>What is it?</h2>
