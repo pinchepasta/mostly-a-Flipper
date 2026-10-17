@@ -1,6 +1,9 @@
 <h2>mostly-a-FLIPPER</h2>
 <h3>NEWS:</h3>
-I'm about to implement an mpc server to give mostly-a-Flipper the option to be controlled by an ai for more complex tasks.
+I added a <b>Rolljam</b> feature which uses two Cardputer ADV via espnow, to distribute a super well working Rolljam attack. You need two devices though.
+The feature is tested right now and about to be added in a couple of days!
+
+I'm about to implement an mpc server to give mostly-a-Flipper the option to be controlled by an ai for more complex tasks. (Done and tested)
 <br><br>
 <h2>What is it?</h2>
 <b>Flipper Zero Firmware on Cardputer ADV</b> <br>
