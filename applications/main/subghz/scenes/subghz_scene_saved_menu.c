@@ -35,14 +35,15 @@ void subghz_scene_saved_menu_on_enter(void* context) {
         subghz_scene_saved_menu_submenu_callback,
         subghz);
 
-    if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
+    /* MFP_RC_BYPASS: rolling-code counter mode lives in Signal Settings; do not hide it
+     * behind the debug flag */
         submenu_add_item(
             subghz->submenu,
             "Signal Settings",
             SubmenuIndexSignalSettings,
             subghz_scene_saved_menu_submenu_callback,
             subghz);
-    };
+    
 
     submenu_set_selected_item(
         subghz->submenu,

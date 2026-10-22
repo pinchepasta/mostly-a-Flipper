@@ -1,6 +1,7 @@
 /* Abandon hope, all ye who enter here. */
 
 #include <furi/core/log.h>
+#include <furi_hal_subghz.h>
 #include <subghz/types.h>
 #include <lib/toolbox/path.h>
 #include <float_tools.h>
@@ -258,6 +259,7 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
     subghz->last_settings = subghz_last_settings_alloc();
     //size_t preset_count = subghz_setting_get_preset_count(setting);
     subghz_last_settings_load(subghz->last_settings, 0);
+    furi_hal_subghz_set_rolling_counter_mult(subghz->last_settings->rolling_counter_mult); /* MFP_RC_BYPASS: restore persisted multiplier */
 
     // Set LED and Amp GPIO control state
     furi_hal_subghz_set_ext_leds_and_amp(subghz->last_settings->leds_and_amp);

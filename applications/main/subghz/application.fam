@@ -28,7 +28,7 @@ App(
     apptype=FlipperAppType.PLUGIN,
     entry_point="cli_subghz_ep",
     requires=["cli"],
-    sources=["subghz_cli.c", "helpers/subghz_chat.c"],
+    sources=["subghz_cli.c", "helpers/subghz_chat.c", "scenes/subghz_scene_rolljam.c""helpers/rolljam_espnow.c", ],
 )
 
 App(

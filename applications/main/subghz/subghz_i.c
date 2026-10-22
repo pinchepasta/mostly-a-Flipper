@@ -274,6 +274,29 @@ bool subghz_save_protocol_to_file(
     SubGhz* subghz,
     FlipperFormat* flipper_format,
     const char* dev_file_name) {
+    /* MFP_RC_BYPASS2: keep: keep CounterMode across saves - Emulate rewrites this file and the
+     * protocol serializer does not emit CounterMode itself. */
+    {
+        const char* mfp_src = (dev_file_name && dev_file_name[0]) ?
+                                  dev_file_name :
+                                  ((subghz && subghz->file_path) ?
+                                       furi_string_get_cstr(subghz->file_path) :
+                                       NULL);
+        if(mfp_src && flipper_format) {
+            Storage* mfp_st = furi_record_open(RECORD_STORAGE);
+            FlipperFormat* mfp_rd = flipper_format_file_alloc(mfp_st);
+            uint32_t mfp_cm = 0;
+            if(flipper_format_file_open_existing(mfp_rd, mfp_src) &&
+               flipper_format_read_uint32(mfp_rd, "CounterMode", &mfp_cm, 1)) {
+                flipper_format_rewind(flipper_format);
+                flipper_format_insert_or_update_uint32(flipper_format, "CounterMode", &mfp_cm, 1);
+            }
+            flipper_format_file_close(mfp_rd);
+            flipper_format_free(mfp_rd);
+            furi_record_close(RECORD_STORAGE);
+        }
+    }
+
     furi_assert(subghz);
     furi_assert(flipper_format);
     furi_assert(dev_file_name);

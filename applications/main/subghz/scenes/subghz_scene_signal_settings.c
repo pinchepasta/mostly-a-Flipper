@@ -5,6 +5,16 @@
 #include <machine/endian.h>
 #include <toolbox/strint.h>
 #include <lib/subghz/blocks/generic.h>
+/* MFP_SCENE_FIX */
+/* MFP_SCENE_FIX */ #define MFP_MULT_COUNT 5
+static const char* const mfp_mult_text[MFP_MULT_COUNT] = {
+    "+1 (default)", "0 (freeze)", "+2", "+4", "-1"};
+
+/* MFP_SCENE_FIX */
+static const int32_t mfp_mult_value[MFP_MULT_COUNT] = {1, 0, 2, 4, -1};
+
+void subghz_scene_signal_settings_counter_mult_changed(VariableItem* item);
+
 
 #define TAG "SubGhzSceneSignalSettings"
 
@@ -61,6 +71,16 @@ static Protocols protocols[] = {
 
 #define PROTOCOLS_COUNT (sizeof(protocols) / sizeof(Protocols));
 
+/* MFP_SCENE_FIX: extracted from enclosing scope (was nested) */
+void subghz_scene_signal_settings_counter_mult_changed(VariableItem* item) {
+    uint8_t idx = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, mfp_mult_text[idx]);
+
+    SubGhz* subghz = variable_item_get_context(item);
+    subghz->last_settings->rolling_counter_mult = mfp_mult_value[idx];
+    subghz_last_settings_save(subghz->last_settings);
+    furi_hal_subghz_set_rolling_counter_mult(mfp_mult_value[idx]);
+}
 void subghz_scene_signal_settings_counter_mode_changed(VariableItem* item) {
     uint8_t index = variable_item_get_current_value_index(item);
     variable_item_set_current_value_text(item, counter_mode_text[index]);
@@ -100,6 +120,14 @@ void subghz_scene_signal_settings_counter_mode_changed(VariableItem* item) {
 }
 
 void subghz_scene_signal_settings_byte_input_callback(void* context) {
+
+/* ---- MFP_RC_BYPASS2: global rolling-code counter step ---- */
+#define MFP_MULT_COUNT 5
+
+
+
+/* ---- end MFP_RC_BYPASS2 ---- */
+
     SubGhz* subghz = context;
     view_dispatcher_send_custom_event(subghz->view_dispatcher, SubGhzCustomEventByteInputDone);
 }
@@ -274,6 +302,26 @@ void subghz_scene_signal_settings_on_enter(void* context) {
     variable_item_set_current_value_index(item, 0);
     variable_item_set_current_value_text(item, furi_string_get_cstr(tmp_text));
     variable_item_set_locked(item, (button_not_available), "Not available\nfor this\nprotocol !");
+
+    /* MFP_RC_BYPASS2: global counter step, appended last */
+    {
+        int32_t mfp_cur = subghz->last_settings->rolling_counter_mult;
+        int32_t mfp_idx = 0;
+        for(uint8_t mfp_i = 0; mfp_i < MFP_MULT_COUNT; mfp_i++) {
+            if(mfp_mult_value[mfp_i] == mfp_cur) mfp_idx = mfp_i;
+        }
+        furi_hal_subghz_set_rolling_counter_mult(mfp_mult_value[mfp_idx]);
+
+        item = variable_item_list_add(
+            variable_item_list,
+            "Counter Mult",
+            MFP_MULT_COUNT,
+            subghz_scene_signal_settings_counter_mult_changed,
+            subghz);
+        variable_item_set_current_value_index(item, mfp_idx);
+        variable_item_set_current_value_text(item, mfp_mult_text[mfp_idx]);
+    }
+
     //
 
     furi_assert(cnt_byte_ptr);

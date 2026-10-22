@@ -28,6 +28,7 @@ typedef struct {
     bool leds_and_amp;
     uint8_t tx_power;
     int32_t frequency_offset; // Hz, crystal calibration offset
+    int32_t rolling_counter_mult; /* MFP_RC_BYPASS2: rolling-code step on TX */
 } SubGhzLastSettings;
 
 SubGhzLastSettings* subghz_last_settings_alloc(void);

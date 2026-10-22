@@ -1,4 +1,5 @@
 #include "../subghz_i.h"
+#include "subghz_scene.h"
 #include "subghz_scene_start.h"
 #include <core/record.h>
 #include <dolphin/dolphin.h>
@@ -73,6 +74,12 @@ void subghz_scene_start_on_enter(void* context) {
         subghz->submenu,
         "Radio Settings",
         SubmenuIndexExtSettings,
+        subghz_scene_start_submenu_callback,
+        subghz);
+    submenu_add_item(
+        subghz->submenu,
+        "Rolljam",
+        CcidTestSubmenuIndexRolljam,
         subghz_scene_start_submenu_callback,
         subghz);
     submenu_set_selected_item(

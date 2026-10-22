@@ -84,6 +84,9 @@ bool subghz_block_generic_global_button_override_get(uint8_t* button);
  * Reset subghz_block_generic global structure;
  */
 void subghz_block_generic_global_reset(void* p);
+/* MFP_RC_BYPASS: read CounterMode out of a .sub file, clamped to the protocol's mode count. */
+uint8_t subghz_block_generic_counter_mode_read(FlipperFormat* flipper_format, uint8_t mode_count);
+
 
 /**
  * Get name preset.

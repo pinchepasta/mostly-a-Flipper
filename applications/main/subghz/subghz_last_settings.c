@@ -35,6 +35,7 @@ void subghz_last_settings_free(SubGhzLastSettings* instance) {
 void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count) {
     UNUSED(preset_count);
     furi_assert(instance);
+    instance->rolling_counter_mult = 1; /* MFP_RC_BYPASS2: default step */
 
     // Default values (all others set to 0, if read from file fails these are used)
     instance->frequency = SUBGHZ_LAST_SETTING_DEFAULT_FREQUENCY;
@@ -149,7 +150,11 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
                 flipper_format_rewind(fff_data_file);
             }
 
-        } while(0);
+                if(!flipper_format_read_uint32(
+               fff_data_file, "RollingCounterMult", (uint32_t*)&instance->rolling_counter_mult, 1)) {
+            flipper_format_rewind(fff_data_file);
+        }
+} while(0);
     } else {
         FURI_LOG_E(TAG, "Error open file %s", SUBGHZ_LAST_SETTINGS_PATH);
     }
@@ -260,7 +265,11 @@ bool subghz_last_settings_save(SubGhzLastSettings* instance) {
             break;
         }
 
-        saved = true;
+                uint32_t mfp_mult = (uint32_t)instance->rolling_counter_mult;
+        if(!flipper_format_write_uint32(file, "RollingCounterMult", &mfp_mult, 1)) {
+            break;
+        }
+saved = true;
     } while(0);
 
     if(!saved) {

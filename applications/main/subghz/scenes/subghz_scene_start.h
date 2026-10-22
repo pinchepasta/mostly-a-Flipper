@@ -14,4 +14,5 @@ enum SubmenuIndex {
     SubmenuIndexExtSettings,
     SubmenuIndexRadioSetting,
     SubmenuIndexPlaylist,
+    CcidTestSubmenuIndexRolljam,
 };

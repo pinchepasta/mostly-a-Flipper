@@ -1,4 +1,5 @@
 #include <furi.h>
+#include <furi_hal_subghz.h>
 #include <furi_hal.h>
 
 #include <furi_hal_subghz_i.h>
@@ -26,6 +27,7 @@ void subghz_dangerous_freq() {
     // TODO: Disable this when external module is not CC1101 E07
     SubGhzLastSettings* last_settings = subghz_last_settings_alloc();
     subghz_last_settings_load(last_settings, 0);
+    furi_hal_subghz_set_rolling_counter_mult(last_settings->rolling_counter_mult); /* MFP_RC_BYPASS: restore persisted multiplier */
 
     // Set LED and Amp GPIO control state
     furi_hal_subghz_set_ext_leds_and_amp(last_settings->leds_and_amp);

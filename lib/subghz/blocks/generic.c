@@ -47,6 +47,21 @@ bool subghz_block_generic_global_button_override_get(uint8_t* button) {
 }
 
 void subghz_block_generic_global_reset(void* p) {
+/* MFP_RC_BYPASS: CounterMode is optional; absent/out-of-range means mode 0 (plain remote). */
+uint8_t subghz_block_generic_counter_mode_read(FlipperFormat* flipper_format, uint8_t mode_count) {
+    uint8_t mode = 0;
+    uint32_t tmp = 0;
+    if(!flipper_format || mode_count == 0) return 0;
+    if(!flipper_format_rewind(flipper_format)) return 0;
+    if(flipper_format_read_uint32(flipper_format, "CounterMode", &tmp, 1)) {
+        mode = (uint8_t)tmp;
+    }
+    if(mode >= mode_count) mode = (uint8_t)(mode_count - 1);
+    flipper_format_rewind(flipper_format);
+    return mode;
+}
+
+
     UNUSED(p);
     // dont reset endless_tx, its used in protocols yield function to undless TX
     bool tmp = subghz_block_generic_global.endless_tx;

@@ -37,6 +37,7 @@ typedef enum {
     CcidTestSubmenuIndexInsertSmartcard,
     CcidTestSubmenuIndexRemoveSmartcard,
     CcidTestSubmenuIndexInsertSmartcardReader
+    CcidTestSubmenuIndexRolljam,
 } SubmenuIndex;
 
 static void ccid_test_app_render_callback(Canvas* canvas, void* ctx) {
